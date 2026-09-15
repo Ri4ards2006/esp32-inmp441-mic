@@ -34,11 +34,17 @@ constexpr UBaseType_t AUDIO_TASK_PRIORITY   = 5;                      ///< High 
 constexpr BaseType_t  AUDIO_TASK_CORE       = 1;                      ///< Pin audio acquisition to Core 1
 
 // =============================================================================
-// Diagnostics & Telemetry
+// Diagnostics, Telemetry & Streaming Modes
 // =============================================================================
 constexpr uint32_t SERIAL_BAUD_RATE      = 115200;
 constexpr uint32_t TELEMETRY_INTERVAL_MS = 80;                        ///< Serial VU refresh rate (~12.5 fps)
 constexpr size_t   VU_METER_WIDTH        = 30;                        ///< Width of ASCII VU meter bar
 
-} // namespace Config
+/**
+ * Set to true to stream raw 16-bit PCM integer samples (one per line)
+ * directly over Serial for ingestion by the Edge Impulse Data Forwarder.
+ * Set to false for human-readable real-time VU meter & metrics telemetry.
+ */
+constexpr bool STREAM_RAW_SAMPLES = false;
 
+} // namespace Config

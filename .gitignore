@@ -1,55 +1,89 @@
-# Prerequisites
-*.d
+# ==============================================================================
+# PlatformIO & Embedded Build Artifacts
+# ==============================================================================
+.pio/
+.pioenvs/
+.piolibdeps/
+*.elf
+*.bin
+*.hex
+*.map
 
-# Compiled Object files
-*.slo
-*.lo
+# ==============================================================================
+# Edge Impulse & Machine Learning Artifacts
+# ==============================================================================
+.ei-workspace/
+.edge-impulse/
+edge-impulse-config.json
+ei-*.json
+*.csv
+*.wav
+*.pcm
+
+# ==============================================================================
+# Secrets & Environment Credentials
+# ==============================================================================
+.env
+.env.*
+secrets.h
+*.key
+*.pem
+*.cert
+
+# ==============================================================================
+# IDE & Editor Files
+# ==============================================================================
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/.clangd/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# ==============================================================================
+# Node.js & Tooling
+# ==============================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==============================================================================
+# Python & Virtual Environments
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# ==============================================================================
+# Standard C/C++ Compilation Artifacts
+# ==============================================================================
+*.d
 *.o
 *.obj
-
-# Precompiled Headers
+*.slo
+*.lo
 *.gch
 *.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
 *.so
 *.dylib
 *.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
 *.lib
-
-# Executables
 *.exe
 *.out
 *.app
-
-# Build directories
 build/
 Build/
 build-*/
-
-# CMake generated files
-CMakeFiles/
 CMakeCache.txt
+CMakeFiles/
 cmake_install.cmake
-Makefile
-install_manifest.txt
 compile_commands.json
 
 # Temporary files
@@ -57,13 +91,4 @@ compile_commands.json
 *.log
 *.bak
 *.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
 .cache/

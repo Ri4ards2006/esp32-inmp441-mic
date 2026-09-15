@@ -1,63 +1,49 @@
-# ESP32 + INMP441 I2S Digital Audio System
+# ESP32 + INMP441 Edge Impulse Audio Pipeline
 
-[![PlatformIO](https://img.shields.io/badge/PlatformIO-Core%20v6.2+-orange.svg)](https://platformio.org/)
-[![Platform](https://img.shields.io/badge/Platform-Espressif32-red.svg)](https://docs.platformio.org/page/boards/espressif32/esp32dev.html)
-[![Framework](https://img.shields.io/badge/Framework-Arduino-blue.svg)](https://www.arduino.cc/)
-[![Target](https://img.shields.io/badge/Hardware-ESP32--WROOM--32D-green.svg)](https://www.espressif.com/en/products/socs/esp32)
-[![Sensor](https://img.shields.io/badge/Microphone-INMP441%20I2S%20MEMS-lightgrey.svg)](https://invensense.tdk.com/products/digital/inmp441/)
-[![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
+<div align="center">
 
-A modular, scalable, production-grade embedded firmware architecture for capturing high-fidelity digital audio on an **ESP32-WROOM-32D** development board using an **INMP441** omnidirectional I2S MEMS microphone.
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-Core%20v6.2+-orange.svg?style=for-the-badge&logo=platformio)](https://platformio.org/)
+[![Target MCU](https://img.shields.io/badge/Hardware-ESP32--WROOM--32D-red.svg?style=for-the-badge&logo=espressif)](https://www.espressif.com/)
+[![Sensor](https://img.shields.io/badge/Microphone-INMP441%20I2S%20MEMS-blue.svg?style=for-the-badge)](https://invensense.tdk.com/products/digital/inmp441/)
+[![Edge Impulse](https://img.shields.io/badge/Edge%20Impulse-Studio%20Verified-00A651.svg?style=for-the-badge&logo=edgeimpulse)](https://studio.edgeimpulse.com/)
+[![OS Support](https://img.shields.io/badge/Host-Arch%20Linux%20Ready-1793D1.svg?style=for-the-badge&logo=archlinux)](https://archlinux.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
-Engineered with clean separation of concerns, dedicated FreeRTOS multi-core task scheduling, DMA double-buffering, real-time signal analysis (RMS, dBFS, peak magnitude), and an interactive Serial VU meter.
+**A high-performance, deterministic embedded audio acquisition engine and cloud ingestion bridge for Machine Learning on the Edge.**
 
----
+[Architecture](docs/architecture.md) • [Scaling & ML Deployment](docs/scaling.md) • [Wiring Guide](docs/hardware/wiring.md) • [Hardware Diagnostics](docs/hardware/mic_diagnostics.md) • [Edge Impulse Bridge](scripts/edge-impulse-connect.sh)
 
-## Table of Contents
-
-1. [Project Overview & Objectives](#1-project-overview--objectives)
-2. [Hardware Wiring & Pinout Matrix](#2-hardware-wiring--pinout-matrix)
-3. [Prerequisites & Arch Linux Setup Guide](#3-prerequisites--arch-linux-setup-guide)
-4. [Building, Flashing & Monitoring](#4-building-flashing--monitoring)
-5. [Firmware Architecture](#5-firmware-architecture)
-6. [I2S Protocol & Audio Bit-Shift Mechanics](#6-i2s-protocol--audio-bit-shift-mechanics)
-7. [Future Roadmap](#7-future-roadmap)
-8. [Troubleshooting & Diagnostics](#8-troubleshooting--diagnostics)
+</div>
 
 ---
 
-## 1. Project Overview & Objectives
+## 1. Executive Summary
 
-Analog electret microphones are prone to high electromagnetic interference (EMI), voltage rail ripple, and ADC non-linearities when paired with microcontrollers. The **INMP441** eliminates these drawbacks by integrating:
-- An omnidirectional MEMS acoustic sensor
-- An internal signal conditioning amplifier
-- A 24-bit delta-sigma Analog-to-Digital Converter (ADC)
-- An industry-standard **I2S (Inter-IC Sound)** digital serial bus interface
+This repository delivers a production-grade embedded firmware architecture for capturing high-fidelity digital audio on the **ESP32-WROOM-32D** development board using an **InvenSense INMP441** omnidirectional I2S MEMS microphone. 
 
-### Core Engineering Objectives
-- **Zero-Jitter Ingestion**: Uses direct memory access (DMA) ring buffers managed by the ESP32 hardware I2S peripheral, bypassing CPU polling.
-- **Deterministic Multi-Core Scheduling**: Pins audio sampling to **FreeRTOS Core 1**, leaving Core 0 and `loop()` completely unblocked for networking, MQTT, or DSP.
-- **Strict Separation of Concerns**: Isolates hardware pin configuration, peripheral drivers, and DSP/telemetry logic into independent, unit-testable modules.
-- **Plug-and-Play Extensibility**: Designed as an expandable foundation for FFT spectrum analysis, Edge AI keyword detection, and low-latency WiFi streaming.
+It bridges physical acoustic sampling directly to the **Edge Impulse Studio** cloud dashboard (Project ID: `1113935`, `Ri4iboy-project-1`) for training wake-word detectors, acoustic anomaly classifiers, and voice command recognition models.
+
+### Key Engineering Features
+- **Deterministic Dual-Slot I2S DMA**: Bypasses the known ESP32 mono-mode channel-swapping silicon bug by sampling stereo subframe pairs and de-interleaving the Left channel in software.
+- **Mathematical Clock Decimation**: Generates a hardware clock of $15.36\text{ kHz}$ (safely within the INMP441's $600\text{ kHz} \dots 3.3\text{ MHz}$ continuous bit clock requirement) and decimates by $4$ to stream clean, jitter-free **$3,840\text{ Hz}$** PCM audio.
+- **Pure Numeric CSV Stream**: Eliminates textual logging and framing corruptions, streaming raw signed 16-bit PCM values directly parsed by `edge-impulse-data-forwarder`.
+- **FreeRTOS Multi-Core Affinity**: Audio acquisition runs pinned to **Core 1** at high priority, guaranteeing zero frame-dropping while leaving Core 0 completely free for system tasks.
+- **Automated Host Bridge**: Fully configured Arch Linux environment with patched JSON WebSocket transport for modern Edge Impulse remote management backends.
 
 ---
 
 ## 2. Hardware Wiring & Pinout Matrix
 
-The INMP441 operates as an I2S slave, receiving bit clock (`SCK`) and frame sync (`WS`) from the ESP32 (master), while clocking out digital PCM audio on the `SD` line.
+The INMP441 communicates over a continuous 3-wire digital I2S serial bus.
 
-### Pin Connection Table
-
-| INMP441 Pin | Pin Name / Function | ESP32-WROOM-32D Pin | GPIO Designation | Electrical Details |
-| :--- | :--- | :--- | :--- | :--- |
-| **VDD** | Power Supply | `3V3` | Power Rail | **1.8V to 3.3V DC only**. Never connect to 5V (damages MEMS IC). |
-| **GND** | Power Ground | `GND` | Ground Rail | Common reference ground. |
-| **L/R** | Left/Right Channel Select | `GND` | Ground Rail | **Tied to GND selects Left Channel (Mono)**. Tied to VDD selects Right. |
-| **SD** | Serial Data (Output) | `D32` | `GPIO 32` | 24-bit audio stream output from INMP441 to ESP32 RX. |
-| **WS** | Word Select / LRCLK | `D15` | `GPIO 15` | Frame synchronization clock ($f_{sample}$ = 16 kHz). |
-| **SCK** | Serial Clock / BCLK | `D14` | `GPIO 14` | Continuous bit clock ($f = f_{sample} \times 32 \times 2 = 1.024\text{ MHz}$). |
-
-### Schematic Diagram
+| INMP441 Pin | Pin Function | ESP32 Pin | GPIO Designation | Electrical Specification | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **VDD** | Power Supply | `3V3` | Power Rail | **1.8V to 3.3V DC** (Typical: 3.3V) | Never connect to 5V (damages MEMS IC). |
+| **GND** | Ground | `GND` | Ground Rail | Common Reference Ground | Low-impedance common ground. |
+| **L/R** | Channel Select | `GND` | Ground Rail | **GND = Left Channel** (Mono) | Tie firmly to GND. Never leave floating. |
+| **SD** | Serial Data Out | `D32` | `GPIO 32` | I2S Data Input (ESP32 RX) | 24-bit audio stream MSB-justified in 32-bit slot. |
+| **WS** | Word Select | `D15` | `GPIO 15` | I2S LRCLK (Frame Clock) | $15.36\text{ kHz}$ clock generated by ESP32. |
+| **SCK** | Bit Clock | `D14` | `GPIO 14` | I2S BCLK (Continuous Clock) | $983.04\text{ kHz}$ clock ($15.36\text{ kHz} \times 64$). |
 
 ```
 +-----------------------------------+             +-----------------------+
@@ -75,236 +61,164 @@ The INMP441 operates as an I2S slave, receiving bit clock (`SCK`) and frame sync
 ```
 
 > [!TIP]
-> For in-depth electrical layout guidelines, decoupling capacitor placement, and signal integrity notes, see [`docs/hardware/wiring.md`](docs/hardware/wiring.md).
+> For complete layout recommendations, decoupling capacitor placement, and signal integrity guidelines, see [`docs/hardware/wiring.md`](docs/hardware/wiring.md).
 
 ---
 
-## 3. Prerequisites & Arch Linux Setup Guide
+## 3. Mathematical Invariants & Signal Pipeline
 
-This project is fully compatible with any modern Linux distribution, with streamlined setup instructions tailored for **Arch Linux / Manjaro / EndeavourOS**.
+### 3.1 Clock & Sampling Invariants
+- **I2S Slot Width**: 32 bits per channel
+- **Channel Format**: Stereo dual-slot (`I2S_CHANNEL_FMT_RIGHT_LEFT`)
+- **Hardware Sample Rate**: $f_{\text{sample}} = 15,360\text{ Hz}$
+- **Bit Clock Rate**:
+  $$f_{\text{BCLK}} = 15,360\text{ Hz} \times 32 \times 2 = 983,040\text{ Hz} \approx 983.04\text{ kHz}$$
+  *(Complies with INMP441 minimum SCK limit: $600\text{ kHz} \le f_{\text{SCK}} \le 3.3\text{ MHz}$)*.
 
-### 3.1 Install PlatformIO Core
+### 3.2 Decimation & Frequency Matching
+Downstream Edge Impulse classification models operate at **$3,840\text{ Hz}$**.
 
-PlatformIO can be installed directly from the Arch Linux official repositories or through Python `venv` / `pipx`:
+The firmware performs integer decimation by a factor $M = 4$:
 
-```bash
-# Option A: System package via pacman (Arch Linux official repo)
-sudo pacman -Syu platformio-core
+$$f_{\text{stream}} = \frac{f_{\text{hardware}}}{M} = \frac{15,360\text{ Hz}}{4} = 3,840\text{ Hz}$$
 
-# Option B: Isolated installation via pipx (recommended if managing multiple Python versions)
-sudo pacman -S python-pipx
-pipx install platformio
-pipx ensurepath
-```
+Acoustic bandwidth (Nyquist limit):
 
-Verify your installation:
-```bash
-pio --version
-# Expected output: PlatformIO Core, version 6.x.x
-```
+$$f_{\text{Nyquist}} = \frac{3,840}{2} = 1,920\text{ Hz}$$
 
-### 3.2 Configure Arch Linux `udev` Rules & Serial Permissions
-
-By default, Linux disallows non-root users from accessing USB serial transceivers (`/dev/ttyUSB0` or `/dev/ttyACM0`).
-
-1. **Install PlatformIO udev rules**:
-   You can install the official rules package from the AUR or place the file directly:
-   ```bash
-   # Download official PlatformIO udev rules
-   sudo curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules \
-       -o /etc/udev/rules.d/99-platformio-udev.rules
-
-   # Reload and trigger udev rules
-   sudo udevadm control --reload-rules
-   sudo udevadm trigger
-   ```
-
-2. **Add your user to serial device groups**:
-   On Arch Linux, serial ports belong to the `uucp` group (and additionally `lock` or `dialout`):
-   ```bash
-   sudo usermod -aG uucp $USER
-   sudo usermod -aG dialout $USER
-   ```
-
-3. **Apply group changes**:
-   Log out and log back in, or activate the group in your current subshell:
-   ```bash
-   newgrp uucp
-   ```
+### 3.3 Acoustic Scaling & Gain Boost
+The INMP441 outputs a signed 24-bit two's complement integer in bits `[31:8]` of the 32-bit slot.
+1. The driver de-interleaves Left subframe pairs:
+   $$x_{\text{24-bit}}[n] = \text{slot}_{\text{Left}}[n] \gg 8$$
+2. To optimize dynamic range for human speech ($\approx 60\text{ dB SPL}$) without clipping:
+   $$x_{\text{16-bit}}[n] = \text{clip}\left(\frac{x_{\text{24-bit}}[n]}{2^6}, -32768, 32767\right)$$
+   This applies a **$+12\text{ dB}$ ($4\times$) digital gain boost**, maximizing 16-bit precision for ML inference.
 
 ---
 
-## 4. Building, Flashing & Monitoring
-
-Connect your ESP32 board to your computer via USB.
-
-### 4.1 Compile the Project
-```bash
-pio run
-```
-
-### 4.2 Flash the Firmware
-PlatformIO will auto-detect the serial port (e.g., `/dev/ttyUSB0`):
-```bash
-pio run -t upload
-```
-*To explicitly specify a port:*
-```bash
-pio run -t upload --upload-port /dev/ttyUSB0
-```
-
-### 4.3 Open the Serial Telemetry Monitor
-```bash
-pio run -t monitor
-```
-
-### 4.4 Build, Upload, and Monitor in One Command
-```bash
-pio run -t upload -t monitor
-```
-
-### Expected Serial Monitor Output
-Once booted, the firmware outputs system metadata followed by real-time VU meter telemetry:
-
-```text
-==================================================
-   ESP32-WROOM-32D + INMP441 I2S Audio System     
-==================================================
-Sample Rate : 16000 Hz
-DMA Buffers : 4 x 256 samples
-Pinout      : SCK=14, WS=15, SD=32
---------------------------------------------------
-[OK] I2S Driver initialized successfully.
-[OK] Audio FreeRTOS task spawned on Core 1.
-Streaming real-time VU telemetry to Serial Monitor...
-
-[Task] Audio acquisition task running on Core 1
-VU: [=>                            ] | Peak: -42.10 dBFS | RMS: 0.008 | MaxMag:   67104
-VU: [====>                         ] | Peak: -31.45 dBFS | RMS: 0.027 | MaxMag:  225810
-VU: [===============>              ] | Peak: -14.20 dBFS | RMS: 0.195 | MaxMag: 1634892
-VU: [=========================>    ] | Peak:  -3.80 dBFS | RMS: 0.645 | MaxMag: 5410880
-```
-
-Speak or clap near the microphone to watch the ASCII VU meter dynamically react!
-
----
-
-## 5. Firmware Architecture
-
-The codebase follows an enterprise embedded C++ structure designed for modular expansion:
+## 4. Repository Structure
 
 ```
 esp32-inmp441-mic/
 ├── docs/
+│   ├── architecture.md           # Deep-dive: Dual-slot DMA, silicon quirks, decimation
+│   ├── scaling.md                # Enterprise: Dual-mic arrays, edge ML, flash/SRAM optimization
 │   └── hardware/
-│       └── wiring.md             # Detailed pinout, electrical characteristics, schematics
+│       ├── wiring.md             # Electrical specs, bypass capacitors, schematic flow
+│       └── mic_diagnostics.md    # Isolated hardware test suite & failure modes
 ├── include/
-│   ├── config.h                  # Central hardware pin definitions, sample rates, buffer settings
-│   ├── audio_input.h             # Hardware I2S driver interface & DMA abstraction
-│   └── audio_processor.h         # DSP metrics, RMS/dBFS math, and VU meter visualizer
+│   ├── config.h                  # Hardware pinouts, DMA buffers, streaming switches
+│   ├── audio_input.h             # High-performance I2S DMA driver interface
+│   └── audio_processor.h         # RMS, peak, dBFS math, and ASCII VU visualizer
 ├── src/
-│   ├── audio_input.cpp           # Concrete ESP-IDF I2S DMA implementation
-│   ├── audio_processor.cpp       # Signal conditioning and audio calculations
-│   └── main.cpp                  # FreeRTOS Core 1 task lifecycle and serial telemetry
-├── lib/                          # Directory for project-specific external libraries
-├── platformio.ini                # Build configuration, upload flags, and monitor filters
-└── README.md                     # Main documentation
+│   ├── audio_input.cpp           # Stereo dual-slot de-interleaving driver implementation
+│   ├── audio_processor.cpp       # Signal conditioning & metrics algorithms
+│   └── main.cpp                  # FreeRTOS Core 1 pipeline & Edge Impulse serial output
+├── scripts/
+│   └── edge-impulse-connect.sh   # Automated non-interactive connection helper
+├── platformio.ini                # Optimized toolchain, exception decoder, upload speeds
+└── README.md                     # Master documentation
 ```
 
-### Module Responsibilities
-
-1. **[`include/config.h`](include/config.h)**:
-   - Single source of truth for all configurable constants.
-   - Modifying pins, sample rates (e.g. 16 kHz to 44.1 kHz), DMA buffer depths, or task priorities is done purely within this header without touching driver logic.
-
-2. **[`include/audio_input.h`](include/audio_input.h) / [`src/audio_input.cpp`](src/audio_input.cpp)**:
-   - Wraps ESP-IDF's robust native I2S DMA driver.
-   - Manages peripheral initialization (`i2s_driver_install`, `i2s_set_pin`), DMA zeroing, pause/resume, and zero-copy block reads.
-
-3. **[`include/audio_processor.h`](include/audio_processor.h) / [`src/audio_processor.cpp`](src/audio_processor.cpp)**:
-   - Encapsulates signal math: 24-bit MSB sample extraction, running sum-of-squares calculation for true RMS, peak detection, and conversion to logarithmic Decibels Full Scale (dBFS).
-   - Provides an ASCII VU meter renderer for real-time serial diagnostics.
-
-4. **[`src/main.cpp`](src/main.cpp)**:
-   - Spawns the dedicated `audioTask` on **Core 1** with priority 5 (`xTaskCreatePinnedToCore`).
-   - Keeps `setup()` and `loop()` decoupled from audio acquisition timing.
-
 ---
 
-## 6. I2S Protocol & Audio Bit-Shift Mechanics
+## 5. Quick Start: Build, Flash & Stream
 
-### Frame Structure
-The INMP441 transmits 24-bit 2's complement audio words inside standard 32-bit I2S subframes.
-
-```
-+---------------------------------- 32-Bit Frame ----------------------------------+
-| Bit 31 (MSB) ................. Bit 8 | Bit 7 ......................... Bit 0 (LSB) |
-|            24-Bit Audio Data         |           8 Unused Zero Bits              |
-+--------------------------------------+-------------------------------------------+
+### 5.1 Build the Production Firmware
+Using PlatformIO Core:
+```bash
+pio run
 ```
 
-### Scaling Math in Firmware
-When the ESP32 I2S peripheral reads a 32-bit slot via DMA into an `int32_t`:
-1. The 24 active audio bits occupy the most significant bits `[31:8]`.
-2. To extract the true signed 24-bit sample:
-   ```cpp
-   int32_t sample24 = raw_sample >> 8;
-   ```
-3. To normalize the sample into a floating-point value between $-1.0$ and $+1.0$:
-   ```cpp
-   float normalized = static_cast<float>(sample24) / 8388607.0f; // 2^23 - 1
-   ```
-4. Root Mean Square (RMS) power across $N$ samples:
-   $$\text{RMS} = \sqrt{\frac{1}{N}\sum_{i=1}^{N} \text{normalized}_i^2}$$
-5. Decibels relative to Full Scale:
-   $$\text{dBFS} = 20 \log_{10}(\text{RMS})$$
+### 5.2 Flash to ESP32
+Connect your ESP32-WROOM-32D via USB (`/dev/ttyUSB0`):
+```bash
+pio run -t upload
+```
+
+### 5.3 Launch the Edge Impulse Cloud Bridge
+Run the non-interactive connection bridge:
+```bash
+./scripts/edge-impulse-connect.sh
+```
+
+**Terminal Output:**
+```text
+======================================================
+   ESP32 <-> Edge Impulse Cloud Connection Bridge     
+======================================================
+Target Project : Ri4iboy-project-1 (ID: 1113935)
+Default Sensor : microphone @ 3840 Hz
+
+[OK] Detected serial port: /dev/ttyUSB0
+Launching Edge Impulse Data Forwarder...
+Streaming serial sensor data to project Ri4iboy-project-1...
+[SER] Serial is connected (00:00:00:00:00:00)
+[WS ] Connected to wss://remote-mgmt.edgeimpulse.com
+[SER] Detecting data frequency...
+[SER] Overriding frequency to 3840Hz (via --frequency)
+[WS ] Device "esp32-inmp441" is now connected to project "Ri4iboy-project-1".
+[WS ] Go to https://studio.edgeimpulse.com/studio/1113935/acquisition/training to build your machine learning model!
+```
 
 ---
 
-## 7. Future Roadmap
+## 6. Edge Impulse Studio Data Collection
 
-- [x] **Phase 1: Foundation**
-  - Modular I2S driver architecture with FreeRTOS multi-core task pinning.
-  - Signal conditioning, RMS, peak calculation, and ASCII VU visualizer.
-  - Comprehensive documentation and Arch Linux setup guides.
-
-- [ ] **Phase 2: On-Device DSP & Fast Fourier Transform (FFT)**
-  - Integrate `arduinoFFT` or ESP-DSP hardware-accelerated FFT routines.
-  - Real-time 16/32-band frequency spectrum visualizer over Serial.
-  - Configurable IIR/FIR high-pass filter to remove DC offset and low-frequency handling rumble (< 80 Hz).
-
-- [ ] **Phase 3: Wireless Audio Streaming**
-  - WiFi AP / Station connectivity.
-  - Real-time low-latency audio transmission over **UDP Multicast / RTP**.
-  - WebSocket PCM stream server for browser-based real-time oscilloscopes.
-
-- [ ] **Phase 4: Edge AI & Voice Recognition**
-  - Voice Activity Detection (VAD) algorithm for low-power sleep wake-up.
-  - TensorFlow Lite for Microcontrollers (TFLM) keyword spotting model (e.g., "Hey ESP").
-
-- [ ] **Phase 5: Stereo Acoustic Array**
-  - Connect a second INMP441 with `L/R` tied to `3V3` (Right Channel).
-  - Stereo beamforming and acoustic localization (Time Difference of Arrival - TDOA).
+1. Open your browser to [Edge Impulse Studio — Data Acquisition](https://studio.edgeimpulse.com/studio/1113935/acquisition/training).
+2. Look under **Record new data**:
+   - **Device**: Select `esp32-inmp441` (shows with a green status indicator).
+   - **Sensor**: `Sensor with 1 axes (microphone)` @ `3840 Hz`.
+   - **Sample length**: Set duration (e.g., `10000` ms for 10 seconds).
+   - **Category**: Training or Testing.
+   - **Label**: Enter your class label (e.g., `whistle`, `speech`, `background_noise`).
+3. Click **Start sampling**.
+4. The data forwarder ingests the stream over serial, calculates HMAC-SHA256 signatures, and uploads the `.wav` audio directly into your project!
 
 ---
 
-## 8. Troubleshooting & Diagnostics
+## 7. Dual-Mode Firmware Configuration
 
-### 1. `Permission denied: '/dev/ttyUSB0'`
-- **Cause**: User account missing serial group permissions.
-- **Solution**: Execute `sudo usermod -aG uucp $USER` (Arch Linux) or `sudo usermod -aG dialout $USER` (Ubuntu/Debian), then log out and back in.
+In [`include/config.h`](include/config.h), the firmware provides an instant toggle between production data streaming and human-readable diagnostics:
 
-### 2. Flatline Audio Output (All Zeros or Constant Low Noise)
-- **Check `L/R` Pin**: Ensure the `L/R` pin is securely tied to `GND`. If left floating, the microphone behavior is undefined.
-- **Check Power Rail**: Ensure `VDD` is connected to `3V3`, not `5V` or an unpowered rail.
-- **Inspect Pin Mapping**: Verify that GPIO 14 (SCK), GPIO 15 (WS), and GPIO 32 (SD) correspond to your board's physical pin layout.
+```cpp
+// Set to 'true' for Edge Impulse data ingestion (strict raw numeric PCM output)
+// Set to 'false' for human-readable real-time ASCII VU meters and RMS metrics
+constexpr bool STREAM_RAW_SAMPLES = true;
+```
 
-### 3. ESP32 Fails to Flash / Reset Issues
-- **Cause**: `GPIO 15` is a strapping pin (`MTDO`). Some ESP32 development boards require this pin to be in a specific state during reset.
-- **Solution**: Hold down the **BOOT** button while PlatformIO initiates the upload sequence. Alternatively, if flashing conflicts persist, remap `PIN_I2S_WS` to `GPIO 25` in [`include/config.h`](include/config.h).
+When set to `false`, open the serial monitor to view live diagnostic meters:
+```bash
+pio run -t monitor
+```
+```text
+VU: [================>             ] | Peak: -14.20 dBFS | RMS: 0.195 | MaxMag: 1634892
+VU: [=========================>    ] | Peak:  -3.80 dBFS | RMS: 0.645 | MaxMag: 5410880
+```
 
 ---
 
-## License
+## 8. Troubleshooting Matrix
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+| Symptom | Probable Cause | Corrective Action |
+| :--- | :--- | :--- |
+| **All Zeros / Flatline Audio** | ESP32 Mono Channel Bug or Floating `L/R` pin | Ensure latest firmware is flashed (uses `I2S_CHANNEL_FMT_RIGHT_LEFT`). Verify `L/R` is tied to `GND`. Check DC voltage on `VDD` pin ($\ge 3.2\text{V}$). |
+| **`Resource temporarily unavailable Cannot lock port`** | Serial port locked by another process | Kill stale forwarder or monitor: run `fuser -k /dev/ttyUSB0` or terminate with `Ctrl+C`. |
+| **`Permission denied: '/dev/ttyUSB0'`** | Missing Linux group permissions | On Arch Linux: `sudo usermod -aG uucp $USER` (or `dialout` on Debian/Ubuntu), then log out and back in. |
+| **`Failed to parse message` on WebSocket** | Upstream CLI CBOR mismatch | The CLI installed in `~/.npm-global` has been patched to use JSON WebSocket frames. Launch via `./scripts/edge-impulse-connect.sh`. |
+| **Cold Solder Joints** | Loose header pins on INMP441 | INMP441 breakout pins **must be soldered**. Press-fit pins fail at high clock speeds ($> 900\text{ kHz}$). |
+
+---
+
+## 9. Comprehensive Documentation Index
+
+- 📐 **[Subsystem Architecture Specification](docs/architecture.md)**: Deep-dive into clock generation, I2S FIFO registers, and latency analysis.
+- 🚀 **[Enterprise Scaling & Deployment Guide](docs/scaling.md)**: Stereo microphone arrays, beamforming, and on-device ML inference deployment.
+- 🔌 **[Hardware Wiring & Electrical Guide](docs/hardware/wiring.md)**: Complete pin matrices, power filtering, and signal timing diagrams.
+- 🩺 **[Hardware Diagnostic Test Suite](docs/hardware/mic_diagnostics.md)**: Isolated dual-channel diagnostic test suite for hardware verification.
+
+---
+
+## 10. License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

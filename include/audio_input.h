@@ -29,9 +29,11 @@ public:
     void end();
 
     /**
-     * @brief Read raw 32-bit audio samples from the I2S DMA queue.
-     * @param[out] buffer Destination buffer for 32-bit samples.
-     * @param[in] samples_to_read Total number of 32-bit samples requested.
+     * @brief Read 24-bit signed audio samples from the active microphone channel.
+     * Captures stereo pairs internally to eliminate ESP32 mono hardware quirks,
+     * returning clean single-channel samples.
+     * @param[out] buffer Destination buffer for signed 24-bit audio samples.
+     * @param[in] samples_to_read Total number of audio samples requested.
      * @param[in] timeout_ticks FreeRTOS ticks to wait before timing out.
      * @return Number of samples successfully read.
      */
@@ -55,5 +57,6 @@ public:
 private:
     i2s_port_t _port;
     bool _isRunning;
+    int32_t* _stereo_buf;
+    size_t _stereo_buf_capacity;
 };
-

@@ -21,7 +21,9 @@ constexpr gpio_num_t PIN_I2S_SD  = GPIO_NUM_32;  ///< Serial Data In (SD)
 // I2S Peripheral & DMA Configuration
 // =============================================================================
 constexpr i2s_port_t I2S_PORT            = I2S_NUM_0;
-constexpr uint32_t   AUDIO_SAMPLE_RATE   = 16000;                     ///< 16 kHz sample rate
+constexpr uint32_t   AUDIO_SAMPLE_RATE   = 15360;                     ///< 15.36 kHz hardware rate (SCK = 983 kHz, within INMP441 600k-3.3M spec)
+constexpr uint32_t   DECIMATION_FACTOR   = 4;                         ///< Decimation factor: 15360 / 4 = 3840 Hz
+constexpr uint32_t   EFFECTIVE_FREQ_HZ   = AUDIO_SAMPLE_RATE / DECIMATION_FACTOR; ///< 3840 Hz target for Edge Impulse
 constexpr size_t     AUDIO_DMA_BUF_COUNT = 4;                         ///< Number of DMA ring buffers
 constexpr size_t     AUDIO_DMA_BUF_LEN   = 256;                       ///< Samples per DMA buffer
 constexpr size_t     AUDIO_CHUNK_SAMPLES = 256;                       ///< Samples processed per cycle
@@ -41,9 +43,9 @@ constexpr uint32_t TELEMETRY_INTERVAL_MS = 80;                        ///< Seria
 constexpr size_t   VU_METER_WIDTH        = 30;                        ///< Width of ASCII VU meter bar
 
 /**
- * Set to true to stream raw 16-bit PCM integer samples (one per line)
- * directly over Serial for ingestion by the Edge Impulse Data Forwarder.
- * Set to false for human-readable real-time VU meter & metrics telemetry.
+ * When true, suppresses all textual banners and logs, streaming ONLY raw
+ * 16-bit PCM integer samples (CSV: one value per line) for Edge Impulse.
+ * When false, outputs human-readable real-time VU meter & metrics telemetry.
  */
 constexpr bool STREAM_RAW_SAMPLES = true;
 

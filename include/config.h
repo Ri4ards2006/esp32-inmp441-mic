@@ -45,6 +45,6 @@ constexpr size_t   VU_METER_WIDTH        = 30;                        ///< Width
  * directly over Serial for ingestion by the Edge Impulse Data Forwarder.
  * Set to false for human-readable real-time VU meter & metrics telemetry.
  */
-constexpr bool STREAM_RAW_SAMPLES = false;
+constexpr bool STREAM_RAW_SAMPLES = true;
 
 } // namespace Config

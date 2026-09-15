@@ -83,3 +83,4 @@ If you see this:
 2. **Check `L/R` Pin**: If `L/R` is floating or has a poor connection, the chip may stay in high-impedance mode. Tie it directly to `GND`.
 3. **Inspect Solder Joints**: INMP441 boards often come with unsoldered pin headers. Header pins that are loosely resting in through-holes without solder will not establish contact for high-frequency clock signals (>1 MHz).
 4. **Jumper Wires**: Swap breadboard jumper wires on SCK (GPIO 14), WS (GPIO 15), and SD (GPIO 32).
+

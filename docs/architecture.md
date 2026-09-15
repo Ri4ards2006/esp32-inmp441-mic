@@ -188,3 +188,4 @@ This maximizes the 16-bit dynamic range without integer clipping during normal a
 1. **Deterministic DMA Reads**: `audioTask` is pinned exclusively to **Core 1** at priority 5.
 2. **Zero Block on Core 0**: Core 0 is reserved for ESP32 background duties (WiFi, RF calibration, Bluetooth).
 3. **Task Yielding**: Calls to `taskYIELD()` ensure equal-priority application threads on Core 1 receive fair time-slicing.
+

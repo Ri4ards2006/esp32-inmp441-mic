@@ -148,3 +148,4 @@ For battery-operated remote IoT sensor nodes:
    ```
 2. **Threshold Wake-Up (Voice Activity Detection)**:
    Keep the CPU in light sleep; evaluate incoming audio RMS power in a low-frequency FreeRTOS tick. If amplitude exceeds a calibrated noise threshold (e.g., $>-35\text{ dBFS}$), ramp CPU to 240 MHz and trigger Edge Impulse classification.
+

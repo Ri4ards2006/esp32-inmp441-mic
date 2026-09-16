@@ -1,54 +1,116 @@
 /**
  * @file main.cpp
- * @brief Production Audio Pipeline for ESP32 + INMP441 with Edge Impulse Data Streaming.
+ * @brief Real-Time On-Device Keyword Spotting ("hello") using Edge Impulse & ESP32 + INMP441.
  */
 
 #include <Arduino.h>
 #include "config.h"
 #include "audio_input.h"
 #include "audio_processor.h"
+#include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 
 static AudioInput audioInput;
 static AudioProcessor audioProcessor;
 static TaskHandle_t audioTaskHandle = nullptr;
 
+// 1000 ms sliding audio inference buffer (3840 raw int16_t PCM samples @ 3840 Hz)
+static int16_t inference_buffer[Config::INFERENCE_BUFFER_SIZE];
+static size_t inference_buf_count = 0;
+static uint32_t led_turn_off_time = 0;
+
 /**
- * @brief Dedicated FreeRTOS task running on Core 1 for deterministic audio ingestion.
+ * @brief Signal callback to convert 16-bit integer PCM into normalized float samples for Edge Impulse.
+ */
+static int raw_feature_get_data(size_t offset, size_t length, float *out_ptr) {
+    return numpy::int16_to_float(&inference_buffer[offset], out_ptr, length);
+}
+
+/**
+ * @brief Dedicated FreeRTOS task running on Core 1 for deterministic audio acquisition & inference.
  */
 static void audioTask(void* parameter) {
-    int32_t pcm24_buffer[Config::AUDIO_CHUNK_SAMPLES];
-    uint32_t last_telemetry_ms = 0;
+    int32_t pcm24_chunk[Config::AUDIO_CHUNK_SAMPLES];
 
     while (true) {
-        size_t samples_read = audioInput.read(pcm24_buffer, Config::AUDIO_CHUNK_SAMPLES, portMAX_DELAY);
+        // Check non-blocking status LED auto-off timer
+        if (led_turn_off_time > 0 && millis() >= led_turn_off_time) {
+            digitalWrite(Config::PIN_STATUS_LED, LOW);
+            led_turn_off_time = 0;
+        }
+
+        size_t samples_read = audioInput.read(pcm24_chunk, Config::AUDIO_CHUNK_SAMPLES, portMAX_DELAY);
 
         if (samples_read > 0) {
             if (Config::STREAM_RAW_SAMPLES) {
-                // Stream 16-bit PCM integer samples (CSV: one value per line)
-                // Subsample/decimate by DECIMATION_FACTOR (15360 / 4 = 3840 Hz)
+                // Stream 16-bit PCM integer samples (CSV: one value per line) for data forwarder
                 for (size_t i = 0; i < samples_read; i += Config::DECIMATION_FACTOR) {
-                    // 24-bit signed sample shifted by 6 provides a clean 4x gain for voice detection
-                    int32_t val = pcm24_buffer[i] >> 6;
+                    int32_t val = pcm24_chunk[i] >> 6;
                     if (val > 32767) val = 32767;
                     if (val < -32768) val = -32768;
                     Serial.println(static_cast<int16_t>(val));
                 }
             } else {
-                // Human-readable diagnostic & visual VU telemetry
-                AudioMetrics metrics = audioProcessor.analyze(pcm24_buffer, samples_read);
+                // Decimate 15,360 Hz hardware I2S down to 3,840 Hz (M = 4) and append to inference buffer
+                for (size_t i = 0; i < samples_read; i += Config::DECIMATION_FACTOR) {
+                    int32_t val = pcm24_chunk[i] >> 6;
+                    if (val > 32767) val = 32767;
+                    if (val < -32768) val = -32768;
 
-                uint32_t now = millis();
-                if (now - last_telemetry_ms >= Config::TELEMETRY_INTERVAL_MS) {
-                    last_telemetry_ms = now;
+                    if (inference_buf_count < Config::INFERENCE_BUFFER_SIZE) {
+                        inference_buffer[inference_buf_count++] = static_cast<int16_t>(val);
+                    }
+                }
 
-                    float display_level = metrics.rms * 15.0f;
-                    String vu = AudioProcessor::createVUMeter(display_level, Config::VU_METER_WIDTH);
+                // Execute inference when buffer contains a complete 1000 ms window
+                if (inference_buf_count >= Config::INFERENCE_BUFFER_SIZE) {
+                    signal_t signal;
+                    signal.total_length = Config::INFERENCE_BUFFER_SIZE;
+                    signal.get_data = &raw_feature_get_data;
 
-                    Serial.printf("VU: %s | Peak: %6.2f dBFS | RMS: %5.3f | MaxMag: %7d\r\n",
-                                  vu.c_str(),
-                                  metrics.dbfs,
-                                  metrics.rms,
-                                  metrics.raw_peak);
+                    ei_impulse_result_t result = { 0 };
+                    EI_IMPULSE_ERROR r = run_classifier(&signal, &result, false);
+
+                    if (r == EI_IMPULSE_OK) {
+                        float hello_confidence = 0.0f;
+
+                        // Scan predictions for "hello" target keyword
+                        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+                            if (strcmp(result.classification[ix].label, "hello") == 0) {
+                                hello_confidence = result.classification[ix].value;
+                            }
+                        }
+
+                        // Trigger onboard LED on GPIO 2 if detection exceeds confidence threshold
+                        if (hello_confidence >= Config::KEYWORD_CONFIDENCE_THRESHOLD) {
+                            digitalWrite(Config::PIN_STATUS_LED, HIGH);
+                            led_turn_off_time = millis() + Config::LED_ACTIVE_DURATION_MS;
+
+                            Serial.printf("\r\n=======================================================\r\n");
+                            Serial.printf(">>> [KEYWORD DETECTED] 'hello' (%.2f%% confidence) <<<\r\n", 
+                                          hello_confidence * 100.0f);
+                            Serial.printf("=======================================================\r\n");
+                        }
+
+                        // Log real-time telemetry and timing breakdown
+                        Serial.printf("Predictions (DSP: %d ms, NN: %d ms): ", 
+                                      result.timing.dsp, result.timing.classification);
+                        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+                            Serial.printf("%s: %.3f  ", 
+                                          result.classification[ix].label, 
+                                          result.classification[ix].value);
+                        }
+#if EI_CLASSIFIER_HAS_ANOMALY == 1
+                        Serial.printf("anomaly: %.3f", result.anomaly);
+#endif
+                        Serial.println();
+                    } else {
+                        Serial.printf("[ERROR] Classifier failed with code: %d\r\n", r);
+                    }
+
+                    // Shift buffer by hop size (250 ms slide = 960 samples)
+                    size_t remaining = Config::INFERENCE_BUFFER_SIZE - Config::INFERENCE_SLIDE_SAMPLES;
+                    memmove(inference_buffer, &inference_buffer[Config::INFERENCE_SLIDE_SAMPLES], remaining * sizeof(int16_t));
+                    inference_buf_count = remaining;
                 }
             }
         }
@@ -59,17 +121,28 @@ static void audioTask(void* parameter) {
 
 void setup() {
     Serial.begin(Config::SERIAL_BAUD_RATE);
-    delay(500); // Allow hardware lines to settle
+    delay(500); // Allow serial and hardware lines to settle
+
+    // Configure onboard status LED on GPIO 2
+    pinMode(Config::PIN_STATUS_LED, OUTPUT);
+    digitalWrite(Config::PIN_STATUS_LED, LOW);
 
     if (!Config::STREAM_RAW_SAMPLES) {
         Serial.println("\r\n==================================================");
-        Serial.println("   ESP32-WROOM-32D + INMP441 Audio Ingestion      ");
+        Serial.println("   ESP32-WROOM-32D Edge Impulse Keyword Spotter   ");
         Serial.println("==================================================");
-        Serial.printf("Hardware Rate   : %u Hz\r\n", Config::AUDIO_SAMPLE_RATE);
-        Serial.printf("Output Stream   : %u Hz (Decimation: %u)\r\n", 
-                      Config::EFFECTIVE_FREQ_HZ, Config::DECIMATION_FACTOR);
-        Serial.printf("Pinout          : SCK=%d, WS=%d, SD=%d\r\n", 
-                      Config::PIN_I2S_SCK, Config::PIN_I2S_WS, Config::PIN_I2S_SD);
+        Serial.printf("Model Project   : %s (ID: %d)\r\n", 
+                      EI_CLASSIFIER_PROJECT_NAME, EI_CLASSIFIER_PROJECT_ID);
+        Serial.printf("Target Keyword  : 'hello' (Threshold: %.2f)\r\n", 
+                      Config::KEYWORD_CONFIDENCE_THRESHOLD);
+        Serial.printf("Hardware I2S    : %u Hz (SCK=%d, WS=%d, SD=%d)\r\n", 
+                      Config::AUDIO_SAMPLE_RATE, Config::PIN_I2S_SCK, 
+                      Config::PIN_I2S_WS, Config::PIN_I2S_SD);
+        Serial.printf("DSP Decimation  : 15360 / %u = %u Hz (Window: %d samples)\r\n", 
+                      Config::DECIMATION_FACTOR, Config::EFFECTIVE_FREQ_HZ, 
+                      Config::INFERENCE_BUFFER_SIZE);
+        Serial.printf("Status LED      : GPIO %d (Active HIGH for %u ms)\r\n", 
+                      Config::PIN_STATUS_LED, Config::LED_ACTIVE_DURATION_MS);
         Serial.println("--------------------------------------------------");
     }
 
@@ -87,10 +160,10 @@ void setup() {
         Serial.println("[OK] I2S Driver initialized successfully.");
     }
 
-    // Launch FreeRTOS acquisition task pinned to Core 1
+    // Launch FreeRTOS acquisition & inference task pinned to Core 1
     BaseType_t task_created = xTaskCreatePinnedToCore(
         audioTask,
-        "AudioAcquisition",
+        "AudioInference",
         Config::AUDIO_TASK_STACK_SIZE,
         nullptr,
         Config::AUDIO_TASK_PRIORITY,
@@ -100,10 +173,10 @@ void setup() {
 
     if (!Config::STREAM_RAW_SAMPLES) {
         if (task_created != pdPASS) {
-            Serial.println("[ERROR] Failed to spawn audio FreeRTOS task!");
+            Serial.println("[ERROR] Failed to spawn audio inference task!");
         } else {
-            Serial.println("[OK] Audio FreeRTOS task spawned on Core 1.");
-            Serial.println("Streaming real-time VU telemetry to Serial Monitor...\r\n");
+            Serial.println("[OK] Audio inference task active on Core 1.");
+            Serial.println("Listening for keyword 'hello'...\r\n");
         }
     }
 }

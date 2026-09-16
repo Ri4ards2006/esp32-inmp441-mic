@@ -63,48 +63,71 @@ static void audioTask(void* parameter) {
 
                 // Execute inference when buffer contains a complete 1000 ms window
                 if (inference_buf_count >= Config::INFERENCE_BUFFER_SIZE) {
-                    signal_t signal;
-                    signal.total_length = Config::INFERENCE_BUFFER_SIZE;
-                    signal.get_data = &raw_feature_get_data;
+                    bool voice_active = true;
+                    if (Config::ENABLE_ENERGY_THROTTLING) {
+                        int32_t peak_mag = 0;
+                        for (size_t i = 0; i < Config::INFERENCE_BUFFER_SIZE; ++i) {
+                            int16_t s = inference_buffer[i];
+                            int32_t mag = (s < 0) ? -s : s;
+                            if (mag > peak_mag) peak_mag = mag;
+                        }
+                        if (peak_mag < Config::AUDIO_ACTIVITY_THRESHOLD) {
+                            voice_active = false;
+                        }
+                    }
 
-                    ei_impulse_result_t result = { 0 };
-                    EI_IMPULSE_ERROR r = run_classifier(&signal, &result, false);
+                    if (voice_active) {
+                        signal_t signal;
+                        signal.total_length = Config::INFERENCE_BUFFER_SIZE;
+                        signal.get_data = &raw_feature_get_data;
 
-                    if (r == EI_IMPULSE_OK) {
-                        float hello_confidence = 0.0f;
+                        ei_impulse_result_t result = { 0 };
+                        EI_IMPULSE_ERROR r = run_classifier(&signal, &result, false);
 
-                        // Scan predictions for "hello" target keyword
-                        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-                            if (strcmp(result.classification[ix].label, "hello") == 0) {
-                                hello_confidence = result.classification[ix].value;
+                        if (r == EI_IMPULSE_OK) {
+                            float hello_confidence = 0.0f;
+
+                            // Scan predictions for "hello" target keyword
+                            for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+                                if (strcmp(result.classification[ix].label, "hello") == 0) {
+                                    hello_confidence = result.classification[ix].value;
+                                }
                             }
-                        }
 
-                        // Trigger onboard LED on GPIO 2 if detection exceeds confidence threshold
-                        if (hello_confidence >= Config::KEYWORD_CONFIDENCE_THRESHOLD) {
-                            digitalWrite(Config::PIN_STATUS_LED, HIGH);
-                            led_turn_off_time = millis() + Config::LED_ACTIVE_DURATION_MS;
+                            // Trigger onboard LED on GPIO 2 if detection exceeds confidence threshold
+                            if (hello_confidence >= Config::KEYWORD_CONFIDENCE_THRESHOLD) {
+                                digitalWrite(Config::PIN_STATUS_LED, HIGH);
+                                led_turn_off_time = millis() + Config::LED_ACTIVE_DURATION_MS;
 
-                            Serial.printf("\r\n=======================================================\r\n");
-                            Serial.printf(">>> [KEYWORD DETECTED] 'hello' (%.2f%% confidence) <<<\r\n", 
-                                          hello_confidence * 100.0f);
-                            Serial.printf("=======================================================\r\n");
-                        }
+                                Serial.printf("\r\n=======================================================\r\n");
+                                Serial.printf(">>> [KEYWORD DETECTED] 'hello' (%.2f%% confidence) <<<\r\n", 
+                                              hello_confidence * 100.0f);
+                                Serial.printf("=======================================================\r\n");
+                            }
 
-                        // Log real-time telemetry and timing breakdown
-                        Serial.printf("Predictions (DSP: %d ms, NN: %d ms): ", 
-                                      result.timing.dsp, result.timing.classification);
-                        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-                            Serial.printf("%s: %.3f  ", 
-                                          result.classification[ix].label, 
-                                          result.classification[ix].value);
-                        }
+                            // Log real-time telemetry and timing breakdown
+                            Serial.printf("Predictions (DSP: %d ms, NN: %d ms): ", 
+                                          result.timing.dsp, result.timing.classification);
+                            for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+                                Serial.printf("%s: %.3f  ", 
+                                              result.classification[ix].label, 
+                                              result.classification[ix].value);
+                            }
 #if EI_CLASSIFIER_HAS_ANOMALY == 1
-                        Serial.printf("anomaly: %.3f", result.anomaly);
+                            Serial.printf("anomaly: %.3f", result.anomaly);
 #endif
-                        Serial.println();
+                            Serial.println();
+                        } else {
+                            Serial.printf("[ERROR] Classifier failed with code: %d\r\n", r);
+                        }
                     } else {
-                        Serial.printf("[ERROR] Classifier failed with code: %d\r\n", r);
+                        // Periodic idle heartbeat showing audio acquisition is active
+                        static uint32_t last_idle_log_ms = 0;
+                        uint32_t now = millis();
+                        if (now - last_idle_log_ms >= 3000) {
+                            last_idle_log_ms = now;
+                            Serial.println("[IDLE] Listening... (ambient audio below threshold, NN inference throttled)");
+                        }
                     }
 
                     // Shift buffer by hop size (250 ms slide = 960 samples)
@@ -112,6 +135,7 @@ static void audioTask(void* parameter) {
                     memmove(inference_buffer, &inference_buffer[Config::INFERENCE_SLIDE_SAMPLES], remaining * sizeof(int16_t));
                     inference_buf_count = remaining;
                 }
+
             }
         }
 

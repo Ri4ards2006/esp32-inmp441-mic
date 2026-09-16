@@ -36,6 +36,9 @@ constexpr float    KEYWORD_CONFIDENCE_THRESHOLD = 0.65f;              ///< Minim
 constexpr uint32_t LED_ACTIVE_DURATION_MS       = 600;                ///< Status LED activation duration (ms)
 constexpr size_t   INFERENCE_BUFFER_SIZE        = 3840;               ///< EI_CLASSIFIER_RAW_SAMPLE_COUNT (1000 ms at 3840 Hz)
 constexpr size_t   INFERENCE_SLIDE_SAMPLES      = 960;                ///< 250 ms hop (4 inferences per second)
+constexpr bool     ENABLE_ENERGY_THROTTLING     = true;               ///< Throttle NN inference when audio is below noise floor
+constexpr int16_t  AUDIO_ACTIVITY_THRESHOLD     = 150;                ///< Minimum peak amplitude to trigger NN inference (~-45 dBFS)
+
 
 // =============================================================================
 // FreeRTOS Task Parameters

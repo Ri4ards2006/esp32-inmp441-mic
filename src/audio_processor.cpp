@@ -25,19 +25,19 @@ AudioMetrics AudioProcessor::analyze(const int32_t* raw_samples, size_t sample_c
     int32_t max_abs = 0;
 
     for (size_t i = 0; i < sample_count; ++i) {
-        // Extract 24-bit signed sample from 32-bit container
-        int32_t sample24 = raw_samples[i] >> 8;
+        // Input is already signed 24-bit (unpacked in AudioInput::read).
+        int32_t sample24 = raw_samples[i];
         int32_t abs_val = std::abs(sample24);
         if (abs_val > max_abs) {
             max_abs = abs_val;
         }
 
-        float normalized = static_cast<float>(sample24) / 8388607.0f;
+        float normalized = mic::s24_to_float(sample24);
         sum_squares += static_cast<double>(normalized * normalized);
     }
 
     metrics.raw_peak = max_abs;
-    metrics.peak = static_cast<float>(max_abs) / 8388607.0f;
+    metrics.peak = mic::s24_to_float(max_abs);
 
     float mean_square = static_cast<float>(sum_squares / sample_count);
     metrics.rms = std::sqrt(mean_square);

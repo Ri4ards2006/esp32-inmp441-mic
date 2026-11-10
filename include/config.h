@@ -22,12 +22,26 @@ constexpr gpio_num_t PIN_STATUS_LED = GPIO_NUM_2;   ///< Onboard Status LED (act
 // I2S Peripheral & DMA Configuration
 // =============================================================================
 constexpr i2s_port_t I2S_PORT            = I2S_NUM_0;
-constexpr uint32_t   AUDIO_SAMPLE_RATE   = 15360;                     ///< 15.36 kHz hardware rate (SCK = 983 kHz, within INMP441 600k-3.3M spec)
+#ifndef MIC_SAMPLE_RATE
+#define MIC_SAMPLE_RATE 15360
+#endif
+constexpr uint32_t   AUDIO_SAMPLE_RATE   = MIC_SAMPLE_RATE;           ///< I2S fs; BCLK = fs * 64 (override with -DMIC_SAMPLE_RATE=...)
 constexpr uint32_t   DECIMATION_FACTOR   = 4;                         ///< Decimation factor: 15360 / 4 = 3840 Hz
 constexpr uint32_t   EFFECTIVE_FREQ_HZ   = AUDIO_SAMPLE_RATE / DECIMATION_FACTOR; ///< 3840 Hz target for Edge Impulse
 constexpr size_t     AUDIO_DMA_BUF_COUNT = 8;                         ///< Expanded DMA ring buffers to prevent overrun during inference
 constexpr size_t     AUDIO_DMA_BUF_LEN   = 256;                       ///< Samples per DMA buffer
 constexpr size_t     AUDIO_CHUNK_SAMPLES = 256;                       ///< Samples processed per cycle
+
+/// Which 32-bit slot of each stereo frame carries the mic. 0 = first word of the pair
+/// (left slot, L/R strapped to GND, as wired in this repo), 1 = second (L/R to VDD).
+#ifndef MIC_I2S_SLOT
+#define MIC_I2S_SLOT 0
+#endif
+constexpr size_t     MIC_SLOT_INDEX      = MIC_I2S_SLOT;
+static_assert(MIC_SLOT_INDEX <= 1, "MIC_SLOT_INDEX must be 0 or 1");
+
+/// -3 dB cutoff of the one-pole DC blocker applied after unpacking.
+constexpr float      DC_BLOCK_CUTOFF_HZ  = 20.0f;
 
 // =============================================================================
 // TinyML Inference & Detection Parameters

@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <cstdint>
 #include <cstddef>
+#include "sample_format.h"
 
 /**
  * @brief Container for real-time audio statistics.
@@ -27,8 +28,9 @@ public:
     AudioProcessor();
 
     /**
-     * @brief Analyzes a buffer of raw 32-bit I2S samples from INMP441.
-     * @param raw_samples Array of 32-bit words from I2S DMA.
+     * @brief Analyzes a buffer of signed 24-bit samples (as returned by AudioInput::read,
+     *        i.e. already unpacked from the 32-bit slot -- do NOT shift again).
+     * @param raw_samples Array of signed 24-bit samples in int32_t.
      * @param sample_count Number of samples in the frame.
      * @return AudioMetrics containing calculated RMS, peak, and dBFS values.
      */
@@ -43,13 +45,10 @@ public:
     static String createVUMeter(float level, size_t bar_width = 25);
 
     /**
-     * @brief Normalizes raw 32-bit I2S sample into a float in range [-1.0f, 1.0f].
-     * Scales INMP441 24-bit MSB-justified data.
+     * @brief Normalizes a raw 32-bit I2S slot into a float in range [-1.0f, 1.0f).
      */
-    static inline float normalizeSample(int32_t raw) {
-        // INMP441 places 24 active bits in the MSBs of the 32-bit word.
-        int32_t sample24 = raw >> 8;
-        return static_cast<float>(sample24) / 8388607.0f;
+    static inline float normalizeSample(int32_t raw_slot) {
+        return mic::s24_to_float(mic::slot_to_s24(raw_slot));
     }
 };
 

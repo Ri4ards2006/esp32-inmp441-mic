@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    name: Firmware build + host tests (PlatformIO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      # env:esp32dev-kws is not built: it needs the gitignored Edge Impulse SDK export.
+      - name: Build pipeline firmware (env:esp32dev, no secrets -> transport disabled)
+        run: pio run -e esp32dev
+      - name: Build pipeline firmware with WiFi transport enabled
+        run: |
+          cp include/secrets.example.h include/secrets.h
+          pio run -e esp32dev
+          rm include/secrets.h
+      - name: Host unit tests (env:native)
+        run: pio test -e native
+
+  receiver:
+    name: Python receiver tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: pytest
+        run: uv run --no-project --python 3.12 --with numpy --with pytest pytest -q tools/receiver

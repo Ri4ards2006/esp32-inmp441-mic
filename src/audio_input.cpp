@@ -5,6 +5,7 @@
 
 #include "audio_input.h"
 #include <esp_log.h>
+#include "sample_format.h"
 
 static const char* TAG = "AudioInput";
 
@@ -28,8 +29,19 @@ esp_err_t AudioInput::begin() {
         return ESP_ERR_NO_MEM;
     }
 
-    // Proven working I2S configuration for INMP441:
-    // Capturing Stereo (RIGHT_LEFT) bypasses ESP32 mono-mode channel-swapping quirks
+    // I2S configuration for the INMP441 (see lib/audio_dsp/src/sample_format.h for the
+    // bit-level frame layout):
+    //  - MASTER | RX: the ESP32 generates SCK and WS, the mic only drives SD.
+    //  - 32-bit slots: the INMP441 needs 64 SCK per WS period (2 x 32). With 16- or
+    //    24-bit slots the frame is shorter than the mic expects and data misaligns.
+    //  - STAND_I2S (Philips): MSB starts one SCK after the WS edge, as the mic sends it.
+    //  - RIGHT_LEFT (stereo) instead of ONLY_LEFT: the ESP-IDF 4.x legacy driver is
+    //    known to swap slots in mono mode on the original ESP32. Capturing both slots
+    //    and picking one in software (Config::MIC_SLOT_INDEX) is unambiguous. Cost:
+    //    2x DMA bandwidth, irrelevant at these rates.
+    //  - BCLK = fs * 64; at 16 kHz that is 1.024 MHz.
+    //  - APLL off: the PLL_D2 divider is sufficient for speech-grade clocks; enable APLL
+    //    if an exact fs matters more than a small (fractional-divider) rate error.
     const i2s_config_t i2s_config = {
         .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX),
         .sample_rate = Config::AUDIO_SAMPLE_RATE,
@@ -111,9 +123,9 @@ size_t AudioInput::read(int32_t* buffer, size_t samples_to_read, TickType_t time
 
     size_t pairs_read = bytes_read / (2 * sizeof(int32_t));
     for (size_t i = 0; i < pairs_read; ++i) {
-        // INMP441 with L/R tied to GND is on Left subframe (index 2*i)
-        // 24-bit MSB-justified inside 32-bit slot: shift right by 8 for signed 24-bit sample
-        buffer[i] = _stereo_buf[2 * i] >> 8;
+        // Pick the slot the mic drives (L/R strap) and unpack 24-bit two's complement
+        // from bits [31:8]. The other slot is tri-stated by the mic and ignored.
+        buffer[i] = mic::slot_to_s24(_stereo_buf[2 * i + Config::MIC_SLOT_INDEX]);
     }
 
     return pairs_read;

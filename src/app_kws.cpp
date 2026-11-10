@@ -6,11 +6,9 @@
 #include <Arduino.h>
 #include "config.h"
 #include "audio_input.h"
-#include "audio_processor.h"
 #include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 
 static AudioInput audioInput;
-static AudioProcessor audioProcessor;
 static TaskHandle_t audioTaskHandle = nullptr;
 
 // 1000 ms sliding audio inference buffer (3840 raw int16_t PCM samples @ 3840 Hz)

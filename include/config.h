@@ -22,12 +22,55 @@ constexpr gpio_num_t PIN_STATUS_LED = GPIO_NUM_2;   ///< Onboard Status LED (act
 // I2S Peripheral & DMA Configuration
 // =============================================================================
 constexpr i2s_port_t I2S_PORT            = I2S_NUM_0;
-constexpr uint32_t   AUDIO_SAMPLE_RATE   = 15360;                     ///< 15.36 kHz hardware rate (SCK = 983 kHz, within INMP441 600k-3.3M spec)
+#ifndef MIC_SAMPLE_RATE
+#define MIC_SAMPLE_RATE 15360
+#endif
+constexpr uint32_t   AUDIO_SAMPLE_RATE   = MIC_SAMPLE_RATE;           ///< I2S fs; BCLK = fs * 64 (override with -DMIC_SAMPLE_RATE=...)
 constexpr uint32_t   DECIMATION_FACTOR   = 4;                         ///< Decimation factor: 15360 / 4 = 3840 Hz
 constexpr uint32_t   EFFECTIVE_FREQ_HZ   = AUDIO_SAMPLE_RATE / DECIMATION_FACTOR; ///< 3840 Hz target for Edge Impulse
 constexpr size_t     AUDIO_DMA_BUF_COUNT = 8;                         ///< Expanded DMA ring buffers to prevent overrun during inference
 constexpr size_t     AUDIO_DMA_BUF_LEN   = 256;                       ///< Samples per DMA buffer
 constexpr size_t     AUDIO_CHUNK_SAMPLES = 256;                       ///< Samples processed per cycle
+
+/// Which 32-bit slot of each stereo frame carries the mic. 0 = first word of the pair
+/// (left slot, L/R strapped to GND, as wired in this repo), 1 = second (L/R to VDD).
+#ifndef MIC_I2S_SLOT
+#define MIC_I2S_SLOT 0
+#endif
+constexpr size_t     MIC_SLOT_INDEX      = MIC_I2S_SLOT;
+static_assert(MIC_SLOT_INDEX <= 1, "MIC_SLOT_INDEX must be 0 or 1");
+
+/// -3 dB cutoff of the one-pole DC blocker applied after unpacking.
+constexpr float      DC_BLOCK_CUTOFF_HZ  = 20.0f;
+
+// =============================================================================
+// Pipeline (env:esp32dev) -- capture -> process -> transport
+// =============================================================================
+constexpr size_t      FRAME_SAMPLES          = 512;   ///< Samples per frame (= FFT size). 32 ms @ 16 kHz
+constexpr size_t      FRAME_POOL_SIZE        = 8;     ///< Frames in flight (power of two). 256 ms @ 16 kHz
+constexpr uint32_t    I2S_READ_TIMEOUT_MS    = 100;   ///< Fail fast if BCLK/DMA stalls instead of hanging
+constexpr uint32_t    STATS_INTERVAL_MS      = 1000;  ///< Serial telemetry period
+
+// On-device DSP (process stage). VAD values are untuned starting points.
+constexpr float       PEAK_MIN_HZ            = 60.0f;  ///< Ignore FFT bins below this (DC / rumble)
+constexpr float       VAD_THRESHOLD_DB       = 10.0f;  ///< Margin over adaptive noise floor
+constexpr float       VAD_MIN_LEVEL_DBFS     = -75.0f; ///< Absolute minimum frame level
+constexpr uint32_t    VAD_HANGOVER_FRAMES    = 8;      ///< 8 x 32 ms = 256 ms
+constexpr float       VAD_FLOOR_RISE_DB      = 0.05f;  ///< Per frame -> ~1.6 dB/s @ 16 kHz/512
+
+/// true: PCM + features per datagram (1064 B, ~266 kbit/s @ 16 kHz).
+/// false: features only (40 B per frame).
+constexpr bool        TRANSPORT_SEND_PCM     = true;
+
+constexpr uint32_t    CAPTURE_TASK_STACK     = 4096;
+constexpr UBaseType_t CAPTURE_TASK_PRIORITY  = 6;     ///< Highest: must drain DMA in time
+constexpr BaseType_t  CAPTURE_TASK_CORE      = 1;
+constexpr uint32_t    PROCESS_TASK_STACK     = 8192;
+constexpr UBaseType_t PROCESS_TASK_PRIORITY  = 5;
+constexpr BaseType_t  PROCESS_TASK_CORE      = 1;
+constexpr uint32_t    TRANSPORT_TASK_STACK   = 6144;
+constexpr UBaseType_t TRANSPORT_TASK_PRIORITY = 3;
+constexpr BaseType_t  TRANSPORT_TASK_CORE    = 0;     ///< Same core as the WiFi stack
 
 // =============================================================================
 // TinyML Inference & Detection Parameters

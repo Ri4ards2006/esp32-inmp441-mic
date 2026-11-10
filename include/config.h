@@ -44,6 +44,24 @@ static_assert(MIC_SLOT_INDEX <= 1, "MIC_SLOT_INDEX must be 0 or 1");
 constexpr float      DC_BLOCK_CUTOFF_HZ  = 20.0f;
 
 // =============================================================================
+// Pipeline (env:esp32dev) -- capture -> process -> transport
+// =============================================================================
+constexpr size_t      FRAME_SAMPLES          = 512;   ///< Samples per frame (= FFT size). 32 ms @ 16 kHz
+constexpr size_t      FRAME_POOL_SIZE        = 8;     ///< Frames in flight (power of two). 256 ms @ 16 kHz
+constexpr uint32_t    I2S_READ_TIMEOUT_MS    = 100;   ///< Fail fast if BCLK/DMA stalls instead of hanging
+constexpr uint32_t    STATS_INTERVAL_MS      = 1000;  ///< Serial telemetry period
+
+constexpr uint32_t    CAPTURE_TASK_STACK     = 4096;
+constexpr UBaseType_t CAPTURE_TASK_PRIORITY  = 6;     ///< Highest: must drain DMA in time
+constexpr BaseType_t  CAPTURE_TASK_CORE      = 1;
+constexpr uint32_t    PROCESS_TASK_STACK     = 8192;
+constexpr UBaseType_t PROCESS_TASK_PRIORITY  = 5;
+constexpr BaseType_t  PROCESS_TASK_CORE      = 1;
+constexpr uint32_t    TRANSPORT_TASK_STACK   = 6144;
+constexpr UBaseType_t TRANSPORT_TASK_PRIORITY = 3;
+constexpr BaseType_t  TRANSPORT_TASK_CORE    = 0;     ///< Same core as the WiFi stack
+
+// =============================================================================
 // TinyML Inference & Detection Parameters
 // =============================================================================
 constexpr float    KEYWORD_CONFIDENCE_THRESHOLD = 0.65f;              ///< Minimum confidence for "hello" detection

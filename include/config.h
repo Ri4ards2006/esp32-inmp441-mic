@@ -51,6 +51,13 @@ constexpr size_t      FRAME_POOL_SIZE        = 8;     ///< Frames in flight (pow
 constexpr uint32_t    I2S_READ_TIMEOUT_MS    = 100;   ///< Fail fast if BCLK/DMA stalls instead of hanging
 constexpr uint32_t    STATS_INTERVAL_MS      = 1000;  ///< Serial telemetry period
 
+// On-device DSP (process stage). VAD values are untuned starting points.
+constexpr float       PEAK_MIN_HZ            = 60.0f;  ///< Ignore FFT bins below this (DC / rumble)
+constexpr float       VAD_THRESHOLD_DB       = 10.0f;  ///< Margin over adaptive noise floor
+constexpr float       VAD_MIN_LEVEL_DBFS     = -75.0f; ///< Absolute minimum frame level
+constexpr uint32_t    VAD_HANGOVER_FRAMES    = 8;      ///< 8 x 32 ms = 256 ms
+constexpr float       VAD_FLOOR_RISE_DB      = 0.05f;  ///< Per frame -> ~1.6 dB/s @ 16 kHz/512
+
 constexpr uint32_t    CAPTURE_TASK_STACK     = 4096;
 constexpr UBaseType_t CAPTURE_TASK_PRIORITY  = 6;     ///< Highest: must drain DMA in time
 constexpr BaseType_t  CAPTURE_TASK_CORE      = 1;

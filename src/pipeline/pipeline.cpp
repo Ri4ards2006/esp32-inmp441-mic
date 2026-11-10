@@ -5,8 +5,10 @@
 #include "pipeline.h"
 
 #include <esp_timer.h>
+#include "audio_dsp.h"
 #include "audio_input.h"
 #include "sample_format.h"
+#include "spectrum.h"
 #include "spsc_ring.h"
 
 namespace pipeline {
@@ -86,12 +88,35 @@ void capture_task(void*) {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: process. Feature extraction + int16 conversion.
+// Stage 2: process. Level, FFT peak, VAD, int16 conversion. Only this task touches
+// g_spectrum / g_vad, so they need no locking.
 // ---------------------------------------------------------------------------
+Spectrum g_spectrum;
+mic::EnergyVad g_vad([] {
+    mic::EnergyVad::Params p;
+    p.threshold_db = Config::VAD_THRESHOLD_DB;
+    p.min_level_dbfs = Config::VAD_MIN_LEVEL_DBFS;
+    p.hangover_frames = Config::VAD_HANGOVER_FRAMES;
+    p.floor_rise_db_per_frame = Config::VAD_FLOOR_RISE_DB;
+    return p;
+}());
+
 void process_frame(AudioFrame& f) {
-    for (size_t i = 0; i < Config::FRAME_SAMPLES; ++i) {
-        f.pcm[i] = mic::float_to_s16(f.samples[i]);
-    }
+    constexpr size_t n = Config::FRAME_SAMPLES;
+    constexpr float bin_hz = static_cast<float>(Config::AUDIO_SAMPLE_RATE) / n;
+    const size_t min_bin = static_cast<size_t>(Config::PEAK_MIN_HZ / bin_hz + 0.5f);
+
+    Features& ft = f.features;
+    ft.rms_dbfs = mic::amplitude_to_dbfs(mic::rms(f.samples, n));
+    ft.peak_dbfs = mic::amplitude_to_dbfs(mic::peak_abs(f.samples, n));
+
+    g_spectrum.compute(f.samples);
+    ft.peak_hz = mic::spectral_peak_hz(g_spectrum.power(), Spectrum::kBins, bin_hz, min_bin);
+
+    ft.voice = g_vad.update(ft.rms_dbfs);
+    ft.noise_floor_dbfs = g_vad.noise_floor_dbfs();
+
+    for (size_t i = 0; i < n; ++i) f.pcm[i] = mic::float_to_s16(f.samples[i]);
 }
 
 void process_task(void*) {
@@ -119,7 +144,10 @@ bool send_frame(const AudioFrame&) {
     return false;  // no network transport configured
 }
 
-void print_stats() {
+// `ft` is a copy taken before the frame was recycled, owned by the transport task.
+void print_stats(const Features& ft) {
+    Serial.printf("[dsp ] rms=%.1f dBFS peak=%.1f dBFS f0=%.0f Hz floor=%.1f dBFS vad=%d\r\n",
+                  ft.rms_dbfs, ft.peak_dbfs, ft.peak_hz, ft.noise_floor_dbfs, ft.voice ? 1 : 0);
     Serial.printf("[pipe] cap=%u drop=%u proc=%u sent=%u err=%u i2s_to=%u proc_us=%u/%u\r\n",
                   g_stats.frames_captured.load(), g_stats.frames_dropped.load(),
                   g_stats.frames_processed.load(), g_stats.frames_sent.load(),
@@ -129,6 +157,7 @@ void print_stats() {
 
 void transport_task(void*) {
     uint32_t last_stats_ms = millis();
+    Features last_features;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(Config::STATS_INTERVAL_MS));
         AudioFrame* f = nullptr;
@@ -136,12 +165,13 @@ void transport_task(void*) {
             if (send_frame(*f)) {
                 g_stats.frames_sent.fetch_add(1, std::memory_order_relaxed);
             }
+            last_features = f->features;
             g_free_ring.push(f);  // cannot fail
         }
         const uint32_t now = millis();
         if (now - last_stats_ms >= Config::STATS_INTERVAL_MS) {  // wrap-safe
             last_stats_ms = now;
-            print_stats();
+            print_stats(last_features);
         }
     }
 }
@@ -152,6 +182,8 @@ const Stats& stats() { return g_stats; }
 
 bool start() {
     for (auto& f : g_pool) g_free_ring.push(&f);
+
+    if (!g_spectrum.begin()) return false;
 
     if (g_input.begin() != ESP_OK) return false;
 

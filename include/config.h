@@ -58,6 +58,10 @@ constexpr float       VAD_MIN_LEVEL_DBFS     = -75.0f; ///< Absolute minimum fra
 constexpr uint32_t    VAD_HANGOVER_FRAMES    = 8;      ///< 8 x 32 ms = 256 ms
 constexpr float       VAD_FLOOR_RISE_DB      = 0.05f;  ///< Per frame -> ~1.6 dB/s @ 16 kHz/512
 
+/// true: PCM + features per datagram (1064 B, ~266 kbit/s @ 16 kHz).
+/// false: features only (40 B per frame).
+constexpr bool        TRANSPORT_SEND_PCM     = true;
+
 constexpr uint32_t    CAPTURE_TASK_STACK     = 4096;
 constexpr UBaseType_t CAPTURE_TASK_PRIORITY  = 6;     ///< Highest: must drain DMA in time
 constexpr BaseType_t  CAPTURE_TASK_CORE      = 1;

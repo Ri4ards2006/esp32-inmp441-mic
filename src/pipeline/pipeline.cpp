@@ -9,7 +9,9 @@
 #include "audio_input.h"
 #include "sample_format.h"
 #include "spectrum.h"
+#include "packet.h"
 #include "spsc_ring.h"
+#include "transport.h"
 
 namespace pipeline {
 namespace {
@@ -140,8 +142,30 @@ void process_task(void*) {
 // Stage 3: transport. Sends frames and returns them to the free ring. Also emits
 // 1 Hz serial telemetry so the pipeline is observable without a network.
 // ---------------------------------------------------------------------------
-bool send_frame(const AudioFrame&) {
-    return false;  // no network transport configured
+bool g_transport_enabled = false;
+uint8_t g_tx_buf[mic::packet_size(Config::FRAME_SAMPLES)];
+uint32_t g_tx_seq = 0;
+
+bool send_frame(const AudioFrame& f) {
+    if (!g_transport_enabled || !transport::ready()) return false;
+    mic::PacketFields pf;
+    pf.voice = f.features.voice;
+    pf.seq = g_tx_seq++;
+    pf.sample_index = f.sample_index;
+    pf.sample_rate = Config::AUDIO_SAMPLE_RATE;
+    pf.rms_dbfs = f.features.rms_dbfs;
+    pf.peak_dbfs = f.features.peak_dbfs;
+    pf.peak_hz = f.features.peak_hz;
+    pf.noise_floor_dbfs = f.features.noise_floor_dbfs;
+    pf.frames_dropped = g_stats.frames_dropped.load(std::memory_order_relaxed);
+    const size_t n = mic::encode_packet(pf, Config::TRANSPORT_SEND_PCM ? f.pcm : nullptr,
+                                        Config::TRANSPORT_SEND_PCM ? Config::FRAME_SAMPLES : 0,
+                                        g_tx_buf, sizeof(g_tx_buf));
+    if (n == 0 || !transport::send(g_tx_buf, n)) {
+        g_stats.send_errors.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
 }
 
 // `ft` is a copy taken before the frame was recycled, owned by the transport task.
@@ -184,6 +208,7 @@ bool start() {
     for (auto& f : g_pool) g_free_ring.push(&f);
 
     if (!g_spectrum.begin()) return false;
+    g_transport_enabled = transport::begin();
 
     if (g_input.begin() != ESP_OK) return false;
 
